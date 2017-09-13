@@ -19,23 +19,6 @@ package org.apache.maven.plugins.shade.mojo;
  * under the License.
  */
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.io.Writer;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
 import org.apache.maven.artifact.Artifact;
 import org.apache.maven.artifact.repository.ArtifactRepository;
 import org.apache.maven.execution.MavenSession;
@@ -79,6 +62,23 @@ import org.codehaus.plexus.context.ContextException;
 import org.codehaus.plexus.personality.plexus.lifecycle.phase.Contextualizable;
 import org.codehaus.plexus.util.IOUtil;
 import org.codehaus.plexus.util.WriterFactory;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.Writer;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Mojo that performs shading delegating to the Shader component.
@@ -150,7 +150,7 @@ public class ShadeMojo
      * syntax <code>groupId</code> is equivalent to <code>groupId:*:*:*</code>, <code>groupId:artifactId</code> is
      * equivalent to <code>groupId:artifactId:*:*</code> and <code>groupId:artifactId:classifier</code> is equivalent to
      * <code>groupId:artifactId:*:classifier</code>. For example:
-     * 
+     * <p>
      * <pre>
      * &lt;artifactSet&gt;
      *   &lt;includes&gt;
@@ -167,7 +167,7 @@ public class ShadeMojo
 
     /**
      * Packages to be relocated. For example:
-     * 
+     * <p>
      * <pre>
      * &lt;relocations&gt;
      *   &lt;relocation&gt;
@@ -182,7 +182,7 @@ public class ShadeMojo
      *   &lt;/relocation&gt;
      * &lt;/relocations&gt;
      * </pre>
-     * 
+     * <p>
      * <em>Note:</em> Support for includes exists only since version 1.4.
      */
     @SuppressWarnings( "MismatchedReadAndWriteOfArray" )
@@ -203,7 +203,7 @@ public class ShadeMojo
      * to use an include to collect a set of files from the archive then use excludes to further reduce the set. By
      * default, all files are included and no files are excluded. If multiple filters apply to an artifact, the
      * intersection of the matched files will be included in the final JAR. For example:
-     * 
+     * <p>
      * <pre>
      * &lt;filters&gt;
      *   &lt;filter&gt;
@@ -490,7 +490,7 @@ public class ShadeMojo
                         replaceFile( finalFile, testJar );
                         testJar = finalFile;
                     }
-                    
+
                     renamed = true;
                 }
 
@@ -498,11 +498,11 @@ public class ShadeMojo
                 {
                     getLog().info( "Attaching shaded artifact." );
                     projectHelper.attachArtifact( project, project.getArtifact().getType(), shadedClassifierName,
-                                                  outputJar );
+                        outputJar );
                     if ( createSourcesJar )
                     {
                         projectHelper.attachArtifact( project, "java-source", shadedClassifierName + "-sources",
-                                                      sourcesJar );
+                            sourcesJar );
                     }
                 }
                 else if ( !renamed )
@@ -722,7 +722,7 @@ public class ShadeMojo
         coordinate.setVersion( artifact.getVersion() );
         coordinate.setExtension( "jar" );
         coordinate.setClassifier( "sources" );
-        
+
         Artifact resolvedArtifact;
         try
         {
@@ -754,7 +754,7 @@ public class ShadeMojo
         for ( PackageRelocation r : relocations )
         {
             relocators.add( new SimpleRelocator( r.getPattern(), r.getShadedPattern(), r.getIncludes(), r.getExcludes(),
-                                                 r.isRawString() ) );
+                r.isRawString() ) );
         }
 
         return relocators;
@@ -980,8 +980,8 @@ public class ShadeMojo
 
     private void rewriteDependencyReducedPomIfWeHaveReduction( List<Dependency> dependencies, boolean modified,
                                                                List<Dependency> transitiveDeps, Model model )
-                                                                   throws IOException, ProjectBuildingException,
-                                                                   DependencyGraphBuilderException
+        throws IOException, ProjectBuildingException,
+        DependencyGraphBuilderException
     {
         if ( modified )
         {
@@ -995,7 +995,7 @@ public class ShadeMojo
                     dependencyReducedPomLocation =
                         File.createTempFile( "dependency-reduced-pom-", ".xml", project.getBasedir() );
                     project.getProperties().setProperty( "maven.shade.dependency-reduced-pom",
-                                                         dependencyReducedPomLocation.getAbsolutePath() );
+                        dependencyReducedPomLocation.getAbsolutePath() );
                 }
                 else
                 {
@@ -1126,7 +1126,7 @@ public class ShadeMojo
     private String getId( Dependency dependency )
     {
         return getId( dependency.getGroupId(), dependency.getArtifactId(), dependency.getType(),
-                      dependency.getClassifier() );
+            dependency.getClassifier() );
     }
 
     private String getId( String groupId, String artifactId, String type, String classifier )
@@ -1136,7 +1136,7 @@ public class ShadeMojo
 
     public boolean updateExcludesInDeps( MavenProject project, List<Dependency> dependencies,
                                          List<Dependency> transitiveDeps )
-                                             throws DependencyGraphBuilderException
+        throws DependencyGraphBuilderException
     {
         DependencyNode node = dependencyGraphBuilder.buildDependencyGraph( project, null );
         boolean modified = false;
@@ -1153,9 +1153,7 @@ public class ShadeMojo
                 boolean found = false;
                 for ( Dependency dep : transitiveDeps )
                 {
-                    if ( dep.getArtifactId().equals( n3.getArtifact().getArtifactId() )
-                        && dep.getGroupId().equals( n3.getArtifact().getGroupId() )
-                        && ( dep.getType() == null || dep.getType().equals( n3.getArtifact().getType() ) ) )
+                    if ( isSame( n3, dep ) )
                     {
                         found = true;
                         break;
@@ -1166,9 +1164,7 @@ public class ShadeMojo
                 {
                     for ( Dependency dep : dependencies )
                     {
-                        if ( dep.getArtifactId().equals( n2.getArtifact().getArtifactId() )
-                            && dep.getGroupId().equals( n2.getArtifact().getGroupId() )
-                            && ( dep.getType() == null || dep.getType().equals( n2.getArtifact().getType() ) ) )
+                        if ( isSame( n2, dep ) )
                         {
                             Exclusion exclusion = new Exclusion();
                             exclusion.setArtifactId( n3.getArtifact().getArtifactId() );
@@ -1182,5 +1178,13 @@ public class ShadeMojo
             }
         }
         return modified;
+    }
+
+    private boolean isSame( DependencyNode n2, Dependency dep )
+    {
+        return dep.getArtifactId().equals( n2.getArtifact().getArtifactId() )
+            && dep.getGroupId().equals( n2.getArtifact().getGroupId() )
+            && ( dep.getType() == null || dep.getType().equals( n2.getArtifact().getType() ) )
+            && ( dep.getClassifier() == null || dep.getType().equals( n2.getArtifact().getClassifier() ) );
     }
 }
