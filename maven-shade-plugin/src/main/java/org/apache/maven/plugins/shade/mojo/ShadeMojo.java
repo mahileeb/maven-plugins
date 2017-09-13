@@ -19,6 +19,7 @@ package org.apache.maven.plugins.shade.mojo;
  * under the License.
  */
 
+import com.google.common.base.Objects;
 import org.apache.maven.artifact.Artifact;
 import org.apache.maven.artifact.repository.ArtifactRepository;
 import org.apache.maven.execution.MavenSession;
@@ -385,7 +386,7 @@ public class ShadeMojo
         setupHintedShader();
 
         Set<File> artifacts = new LinkedHashSet<File>();
-        Set<String> artifactIds = new LinkedHashSet<String>();
+        Set<Artifact> artifactIds = new LinkedHashSet<Artifact>();
         Set<File> sourceArtifacts = new LinkedHashSet<File>();
         Set<File> testArtifacts = new LinkedHashSet<File>();
 
@@ -599,7 +600,7 @@ public class ShadeMojo
         }
     }
 
-    private void processArtifactSelectors( Set<File> artifacts, Set<String> artifactIds, Set<File> sourceArtifacts,
+    private void processArtifactSelectors( Set<File> artifacts, Set<Artifact> artifactIds, Set<File> sourceArtifacts,
                                            ArtifactSelector artifactSelector )
     {
         for ( Artifact artifact : project.getArtifacts() )
@@ -620,7 +621,7 @@ public class ShadeMojo
             getLog().info( "Including " + artifact.getId() + " in the shaded jar." );
 
             artifacts.add( artifact.getFile() );
-            artifactIds.add( getId( artifact ) );
+            artifactIds.add( artifact );
 
             if ( createSourcesJar )
             {
@@ -906,36 +907,45 @@ public class ShadeMojo
 
     // We need to find the direct dependencies that have been included in the uber JAR so that we can modify the
     // POM accordingly.
-    private void createDependencyReducedPom( Set<String> artifactsToRemove )
+    private void createDependencyReducedPom( Set<Artifact> artifactsToRemove )
         throws IOException, DependencyGraphBuilderException, ProjectBuildingException
     {
         List<Dependency> dependencies = new ArrayList<Dependency>();
 
         boolean modified = false;
 
-        List<Dependency> transitiveDeps = new ArrayList<Dependency>();
+        Set<Dependency> origDeps = new LinkedHashSet<Dependency>();
+        origDeps.addAll( project.getDependencies() );
 
-        // NOTE: By using the getArtifacts() we get the completely evaluated artifacts
-        // including the system scoped artifacts with expanded values of properties used.
-        for ( Artifact artifact : project.getArtifacts() )
+        Set<Dependency> transitiveDeps = new LinkedHashSet<Dependency>();
+
+        Set<String> artifactIdsToRemove = new LinkedHashSet<String>();
+        for ( Artifact toRemove : artifactsToRemove )
         {
-            if ( "pom".equals( artifact.getType() ) )
+            artifactIdsToRemove.add( getId( toRemove ) );
+        }
+
+        for ( Artifact toRemove : artifactsToRemove )
+        {
+
+            ProjectBuildingResult buildingResult = projectBuilder.build( toRemove,
+                session.getProjectBuildingRequest() );
+            List<Dependency> dependenciestoPromote = buildingResult.getProject().getDependencies();
+            for ( Dependency dependency : dependenciestoPromote )
             {
-                // don't include pom type dependencies in dependency reduced pom
-                continue;
+                if ( !artifactIdsToRemove.contains( getId( dependency ) ) )
+                {
+                    transitiveDeps.add( dependency );
+                }
             }
 
-            // promote
-            Dependency dep = createDependency( artifact );
-
-            // we'll figure out the exclusions in a bit.
-            transitiveDeps.add( dep );
         }
-        List<Dependency> origDeps = project.getDependencies();
+
 
         if ( promoteTransitiveDependencies )
         {
             origDeps = transitiveDeps;
+            modified = true;
         }
 
         Model model = project.getOriginalModel();
@@ -943,7 +953,7 @@ public class ShadeMojo
         // have some kind of property usage. At this time the properties within
         // such things are already evaluated.
         List<Dependency> originalDependencies = model.getDependencies();
-        removeSystemScopedDependencies( artifactsToRemove, originalDependencies );
+        removeSystemScopedDependencies( artifactIdsToRemove, originalDependencies );
 
         for ( Dependency d : origDeps )
         {
@@ -951,7 +961,7 @@ public class ShadeMojo
 
             String id = getId( d );
 
-            if ( artifactsToRemove.contains( id ) )
+            if ( artifactIdsToRemove.contains( id ) )
             {
                 modified = true;
 
@@ -979,7 +989,7 @@ public class ShadeMojo
     }
 
     private void rewriteDependencyReducedPomIfWeHaveReduction( List<Dependency> dependencies, boolean modified,
-                                                               List<Dependency> transitiveDeps, Model model )
+                                                               Set<Dependency> transitiveDeps, Model model )
         throws IOException, ProjectBuildingException,
         DependencyGraphBuilderException
     {
@@ -1095,29 +1105,6 @@ public class ShadeMojo
         }
     }
 
-    private Dependency createDependency( Artifact artifact )
-    {
-        Dependency dep = new Dependency();
-        dep.setArtifactId( artifact.getArtifactId() );
-        if ( artifact.hasClassifier() )
-        {
-            dep.setClassifier( artifact.getClassifier() );
-        }
-        dep.setGroupId( artifact.getGroupId() );
-        dep.setOptional( artifact.isOptional() );
-        dep.setScope( artifact.getScope() );
-        dep.setType( artifact.getType() );
-        if ( useBaseVersion )
-        {
-            dep.setVersion( artifact.getBaseVersion() );
-        }
-        else
-        {
-            dep.setVersion( artifact.getVersion() );
-        }
-        return dep;
-    }
-
     private String getId( Artifact artifact )
     {
         return getId( artifact.getGroupId(), artifact.getArtifactId(), artifact.getType(), artifact.getClassifier() );
@@ -1134,8 +1121,8 @@ public class ShadeMojo
         return groupId + ":" + artifactId + ":" + type + ":" + ( ( classifier != null ) ? classifier : "" );
     }
 
-    public boolean updateExcludesInDeps( MavenProject project, List<Dependency> dependencies,
-                                         List<Dependency> transitiveDeps )
+    private boolean updateExcludesInDeps( MavenProject project, List<Dependency> dependencies,
+                                          Set<Dependency> transitiveDeps )
         throws DependencyGraphBuilderException
     {
         DependencyNode node = dependencyGraphBuilder.buildDependencyGraph( project, null );
@@ -1180,11 +1167,17 @@ public class ShadeMojo
         return modified;
     }
 
-    private boolean isSame( DependencyNode n2, Dependency dep )
+    private boolean isSame( DependencyNode dep1, Dependency dep2 )
     {
-        return dep.getArtifactId().equals( n2.getArtifact().getArtifactId() )
-            && dep.getGroupId().equals( n2.getArtifact().getGroupId() )
-            && ( dep.getType() == null || dep.getType().equals( n2.getArtifact().getType() ) )
-            && ( dep.getClassifier() == null || dep.getType().equals( n2.getArtifact().getClassifier() ) );
+        Artifact artifact1 = dep1.getArtifact();
+        return isSame( dep2, artifact1 );
+    }
+
+    private boolean isSame( Dependency dep, Artifact artifact )
+    {
+        return Objects.equal( dep.getArtifactId(), artifact.getArtifactId() )
+            && Objects.equal( dep.getGroupId(), artifact.getGroupId() )
+            && Objects.equal( dep.getType(), artifact.getType() )
+            && Objects.equal( dep.getClassifier(), artifact.getClassifier() );
     }
 }
