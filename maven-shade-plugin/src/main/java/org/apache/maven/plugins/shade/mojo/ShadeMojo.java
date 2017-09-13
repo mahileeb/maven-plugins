@@ -62,6 +62,7 @@ import org.codehaus.plexus.context.Context;
 import org.codehaus.plexus.context.ContextException;
 import org.codehaus.plexus.personality.plexus.lifecycle.phase.Contextualizable;
 import org.codehaus.plexus.util.IOUtil;
+import org.codehaus.plexus.util.StringUtils;
 import org.codehaus.plexus.util.WriterFactory;
 
 import java.io.File;
@@ -914,10 +915,10 @@ public class ShadeMojo
 
         boolean modified = false;
 
-        Set<Dependency> origDeps = new LinkedHashSet<Dependency>();
+        List<Dependency> origDeps = new ArrayList<Dependency>();
         origDeps.addAll( project.getDependencies() );
 
-        Set<Dependency> transitiveDeps = new LinkedHashSet<Dependency>();
+        List<Dependency> transitiveDeps = new ArrayList<Dependency>();
 
         Set<String> artifactIdsToRemove = new LinkedHashSet<String>();
         for ( Artifact toRemove : artifactsToRemove )
@@ -933,9 +934,10 @@ public class ShadeMojo
             List<Dependency> dependenciestoPromote = buildingResult.getProject().getDependencies();
             for ( Dependency dependency : dependenciestoPromote )
             {
-                if ( !artifactIdsToRemove.contains( getId( dependency ) ) )
+                if ( !artifactIdsToRemove.contains( getId( dependency ) )
+                    && !containsDependency( transitiveDeps, dependency ) )
                 {
-                    transitiveDeps.add( dependency );
+                    transitiveDeps.add( dependency ); //FIXME need to add or upgrade test > compile scope
                 }
             }
 
@@ -957,7 +959,10 @@ public class ShadeMojo
 
         for ( Dependency d : origDeps )
         {
-            dependencies.add( d );
+            if ( !containsDependency( dependencies, d ) )
+            {
+                dependencies.add( d );
+            }
 
             String id = getId( d );
 
@@ -988,8 +993,35 @@ public class ShadeMojo
         rewriteDependencyReducedPomIfWeHaveReduction( dependencies, modified, transitiveDeps, model );
     }
 
+    private boolean containsDependency( List<Dependency> dependencies, Dependency d )
+    {
+        for ( Dependency dependency : dependencies )
+        {
+            if ( isSame( dependency, d ) )
+            {
+                return true;
+            }
+            else if ( d.getScope().equals( "test" ) )
+            {
+                Dependency compileDep = new Dependency();
+                compileDep.setGroupId( d.getGroupId() );
+                compileDep.setArtifactId( d.getArtifactId() );
+                compileDep.setVersion( d.getVersion() );
+                compileDep.setClassifier( d.getClassifier() );
+                compileDep.setType( d.getType() );
+                compileDep.setScope( "compile" );
+                if ( containsDependency( dependencies, compileDep ) )
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+
     private void rewriteDependencyReducedPomIfWeHaveReduction( List<Dependency> dependencies, boolean modified,
-                                                               Set<Dependency> transitiveDeps, Model model )
+                                                               List<Dependency> transitiveDeps, Model model )
         throws IOException, ProjectBuildingException,
         DependencyGraphBuilderException
     {
@@ -1098,7 +1130,8 @@ public class ShadeMojo
     {
         for ( Dependency dependency : originalDependencies )
         {
-            if ( dependency.getScope() != null && dependency.getScope().equalsIgnoreCase( "system" ) )
+            if ( dependency.getScope() != null && dependency.getScope().equalsIgnoreCase( "system" )
+                && !containsDependency( dependencies, dependency ) )
             {
                 dependencies.add( dependency );
             }
@@ -1122,7 +1155,7 @@ public class ShadeMojo
     }
 
     private boolean updateExcludesInDeps( MavenProject project, List<Dependency> dependencies,
-                                          Set<Dependency> transitiveDeps )
+                                          List<Dependency> transitiveDeps )
         throws DependencyGraphBuilderException
     {
         DependencyNode node = dependencyGraphBuilder.buildDependencyGraph( project, null );
@@ -1156,8 +1189,11 @@ public class ShadeMojo
                             Exclusion exclusion = new Exclusion();
                             exclusion.setArtifactId( n3.getArtifact().getArtifactId() );
                             exclusion.setGroupId( n3.getArtifact().getGroupId() );
-                            dep.addExclusion( exclusion );
-                            modified = true;
+                            if ( !containsExclusion( dep, exclusion ) )
+                            {
+                                dep.addExclusion( exclusion );
+                                modified = true;
+                            }
                             break;
                         }
                     }
@@ -1165,6 +1201,19 @@ public class ShadeMojo
             }
         }
         return modified;
+    }
+
+    private boolean containsExclusion( Dependency dep, Exclusion exclusion )
+    {
+        for ( Exclusion existingExclusion : dep.getExclusions() )
+        {
+            if ( Objects.equal( exclusion.getGroupId(), existingExclusion.getGroupId() )
+                && Objects.equal( exclusion.getArtifactId(), existingExclusion.getArtifactId() ) )
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean isSame( DependencyNode dep1, Dependency dep2 )
@@ -1178,6 +1227,24 @@ public class ShadeMojo
         return Objects.equal( dep.getArtifactId(), artifact.getArtifactId() )
             && Objects.equal( dep.getGroupId(), artifact.getGroupId() )
             && Objects.equal( dep.getType(), artifact.getType() )
-            && Objects.equal( dep.getClassifier(), artifact.getClassifier() );
+            && Objects.equal( dep.getClassifier(), artifact.getClassifier() )
+            && Objects.equal( dep.getScope(), artifact.getScope() );
+    }
+
+
+    private boolean isSame( Dependency d1, Dependency d2 )
+    {
+        return Objects.equal( d1.getArtifactId(), d2.getArtifactId() )
+            && Objects.equal( d1.getGroupId(), d2.getGroupId() )
+            && Objects.equal( d1.getType(), d2.getType() )
+            && Objects.equal( d1.getClassifier(), d2.getClassifier() )
+            && sameScope( d1, d2 );
+    }
+
+    private boolean sameScope( Dependency d1, Dependency d2 )
+    {
+        return Objects.equal( d1.getScope(), d2.getScope() )
+            || ( StringUtils.isEmpty( d1.getScope() ) && d2.getScope().equals( "compile" ) )
+            || ( StringUtils.isEmpty( d2.getScope() ) && d1.getScope().equals( "compile" ) );
     }
 }
