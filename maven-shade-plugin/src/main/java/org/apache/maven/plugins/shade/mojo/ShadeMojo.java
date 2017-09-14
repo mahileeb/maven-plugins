@@ -77,6 +77,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -920,6 +921,8 @@ public class ShadeMojo
 
         List<Dependency> transitiveDeps = new ArrayList<Dependency>();
 
+        Set<Artifact> resolvedArtifacts = project.getArtifacts();
+
         Set<String> artifactIdsToRemove = new LinkedHashSet<String>();
         for ( Artifact toRemove : artifactsToRemove )
         {
@@ -937,7 +940,7 @@ public class ShadeMojo
                 if ( !artifactIdsToRemove.contains( getId( dependency ) )
                     && !containsDependency( transitiveDeps, dependency ) )
                 {
-                    transitiveDeps.add( dependency ); //FIXME need to add or upgrade test > compile scope
+                    addOrUpgradeDependency( transitiveDeps, dependency, resolvedArtifacts );
                 }
             }
 
@@ -961,7 +964,7 @@ public class ShadeMojo
         {
             if ( !containsDependency( dependencies, d ) )
             {
-                dependencies.add( d );
+                addOrUpgradeDependency( dependencies, d, resolvedArtifacts );
             }
 
             String id = getId( d );
@@ -987,10 +990,121 @@ public class ShadeMojo
         // MSHADE-185: We will add those system scoped dependencies
         // from the non interpolated original pom file. So we keep
         // things like this: <systemPath>${tools.jar}</systemPath> intact.
-        addSystemScopedDependencyFromNonInterpolatedPom( dependencies, originalDependencies );
+        addSystemScopedDependencyFromNonInterpolatedPom( dependencies, originalDependencies, resolvedArtifacts );
 
         // Check to see if we have a reduction and if so rewrite the POM.
         rewriteDependencyReducedPomIfWeHaveReduction( dependencies, modified, transitiveDeps, model );
+    }
+
+    private enum Scope
+    {
+        compile( 5 ), runtime( 4 ), test( 3 ), system( 2 ), provided( 1 );
+
+        private final int weight;
+
+        Scope( int weight )
+        {
+
+            this.weight = weight;
+        }
+
+        static Scope parse( String scope )
+        {
+
+            return valueOf( StringUtils.isEmpty( scope ) ? "compile" : scope );
+        }
+
+        public int getWeight()
+        {
+            return weight;
+        }
+    }
+
+    private void addOrUpgradeDependency( List<Dependency> existingDependencies, Dependency dependencyToAdd,
+                                         Set<Artifact> resolvedArtifacts )
+    {
+        for ( Iterator<Dependency> iterator = existingDependencies.iterator(); iterator.hasNext(); )
+        {
+            Dependency existingDependency = iterator.next();
+            if ( isSameExcludingVersionAndScope( dependencyToAdd, existingDependency ) )
+            {
+                Dependency upgradedDependency = new Dependency();
+                upgradedDependency.setGroupId( dependencyToAdd.getGroupId() );
+                upgradedDependency.setArtifactId( dependencyToAdd.getArtifactId() );
+                upgradedDependency.setType( dependencyToAdd.getType() );
+                iterator.remove();
+
+                if ( !existingDependency.getVersion().equals( dependencyToAdd.getVersion() ) )
+                {
+                    resolveVersionClash( dependencyToAdd, resolvedArtifacts, upgradedDependency );
+                }
+                else
+                {
+                    upgradedDependency.setVersion( dependencyToAdd.getVersion() );
+                }
+
+                if ( !existingDependency.getScope().equals( dependencyToAdd.getScope() ) )
+                {
+                    upgradeScope( dependencyToAdd, existingDependency, upgradedDependency );
+                }
+                else
+                {
+                    upgradedDependency.setScope( dependencyToAdd.getScope() );
+                }
+
+                existingDependencies.add( upgradedDependency );
+                return;
+            }
+        }
+
+        existingDependencies.add( dependencyToAdd );
+    }
+
+    private void upgradeScope( Dependency dependencyToAdd, Dependency existingDependency,
+                               Dependency upgradedDependency )
+    {
+        Scope existingScope = Scope.parse( existingDependency.getScope() );
+        Scope scopeToAdd = Scope.parse( dependencyToAdd.getScope() );
+
+        //pick one with stronger scope
+        if ( existingScope.getWeight() > scopeToAdd.getWeight() )
+        {
+            upgradedDependency.setScope( existingScope.name() );
+        }
+        else
+        {
+            upgradedDependency.setScope( scopeToAdd.name() );
+        }
+    }
+
+    private void resolveVersionClash( Dependency dependencyToAdd, Set<Artifact> resolvedArtifacts,
+                                      Dependency upgradedDependency )
+    {
+        //version mismatch, need to find resolved version
+        for ( Artifact resolvedArtifact : resolvedArtifacts )
+        {
+            if ( isSameExcludingVersionAndScope( dependencyToAdd, resolvedArtifact )
+                )
+            {
+                upgradedDependency.setVersion( resolvedArtifact.getVersion() );
+            }
+        }
+    }
+
+    private boolean isSameExcludingVersionAndScope( Dependency dependencyToAdd, Artifact resolvedArtifact )
+    {
+        return Objects.equal( resolvedArtifact.getGroupId(), dependencyToAdd.getGroupId() )
+            && Objects.equal( resolvedArtifact.getArtifactId(), dependencyToAdd.getArtifactId() )
+            && Objects.equal( resolvedArtifact.getType(), dependencyToAdd.getType() )
+            && Objects.equal( resolvedArtifact.getClassifier(), dependencyToAdd.getClassifier() );
+    }
+
+    private boolean isSameExcludingVersionAndScope( Dependency dependency, Dependency transitiveDep )
+    {
+        return Objects.equal( transitiveDep.getArtifactId(), dependency.getArtifactId() )
+            && Objects.equal( transitiveDep.getGroupId(), dependency.getGroupId() )
+            && Objects.equal( transitiveDep.getType(), dependency.getType() )
+            && Objects.equal( transitiveDep.getClassifier(), dependency.getClassifier() );
     }
 
     private boolean containsDependency( List<Dependency> dependencies, Dependency d )
@@ -1126,14 +1240,15 @@ public class ShadeMojo
     }
 
     private void addSystemScopedDependencyFromNonInterpolatedPom( List<Dependency> dependencies,
-                                                                  List<Dependency> originalDependencies )
+                                                                  List<Dependency> originalDependencies,
+                                                                  Set<Artifact> resolvedArtifacts )
     {
         for ( Dependency dependency : originalDependencies )
         {
             if ( dependency.getScope() != null && dependency.getScope().equalsIgnoreCase( "system" )
                 && !containsDependency( dependencies, dependency ) )
             {
-                dependencies.add( dependency );
+                addOrUpgradeDependency( dependencies, dependency, resolvedArtifacts );
             }
         }
     }
