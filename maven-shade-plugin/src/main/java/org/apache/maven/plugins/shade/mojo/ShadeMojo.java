@@ -1034,7 +1034,7 @@ public class ShadeMojo
                 upgradedDependency.setType( dependencyToAdd.getType() );
                 iterator.remove();
 
-                if ( !existingDependency.getVersion().equals( dependencyToAdd.getVersion() ) )
+                if ( !Objects.equal( existingDependency.getVersion(), dependencyToAdd.getVersion() ) )
                 {
                     resolveVersionClash( dependencyToAdd, resolvedArtifacts, upgradedDependency );
                 }
@@ -1043,7 +1043,7 @@ public class ShadeMojo
                     upgradedDependency.setVersion( dependencyToAdd.getVersion() );
                 }
 
-                if ( !existingDependency.getScope().equals( dependencyToAdd.getScope() ) )
+                if ( !Objects.equal( existingDependency.getScope(), dependencyToAdd.getScope() ) )
                 {
                     upgradeScope( dependencyToAdd, existingDependency, upgradedDependency );
                 }
@@ -1115,7 +1115,7 @@ public class ShadeMojo
             {
                 return true;
             }
-            else if ( d.getScope().equals( "test" ) )
+            else if ( "test".equals( d.getScope() ) )
             {
                 Dependency compileDep = new Dependency();
                 compileDep.setGroupId( d.getGroupId() );
@@ -1359,7 +1359,7 @@ public class ShadeMojo
     private boolean sameScope( Dependency d1, Dependency d2 )
     {
         return Objects.equal( d1.getScope(), d2.getScope() )
-            || ( StringUtils.isEmpty( d1.getScope() ) && d2.getScope().equals( "compile" ) )
-            || ( StringUtils.isEmpty( d2.getScope() ) && d1.getScope().equals( "compile" ) );
+            || ( StringUtils.isEmpty( d1.getScope() ) && Objects.equal( d2.getScope(), "compile" ) )
+            || ( StringUtils.isEmpty( d2.getScope() ) && Objects.equal( d1.getScope(), "compile" ) );
     }
 }
